@@ -42,31 +42,94 @@ CLAUDE_MANAGED_ENVIRONMENT_ID=your_environment_id
 PORT=3046
 ```
 
-## How the application was developed
+## How the app was build
 
-The browser collects inputs; the Node host validates requests; the lesson implementation produces observable evidence. The architecture page walks through the real source with numbered steps, prerequisite configuration, source filenames and code excerpts.
+### 1. Validate a fixed report contract
 
-### Lesson implementation
+Only survey_counts with an allowed habitat and a limit from 1 to 20 is accepted. Callers cannot supply arbitrary SQL or a tenant identifier.
 
-[src/lesson.ts](https://github.com/luiscoco/Udemy-claude-managed-agents-lesson-c46-app/blob/main/src/lesson.ts)
+Source: [src/lesson.ts](src/lesson.ts#L13) · selected statements
 
 ```typescript
-  async run(input) {
+const reportName = text(input, "report"),
+  habitat = text(input, "habitat"),
+  limit = number(input, "limit");
 
-const reportName=text(input,"report"),habitat=text(input,"habitat"),limit=number(input,"limit");
-if(reportName!=="survey_counts"||!["forest","wetland"].includes(habitat)||!Number.isInteger(limit)||limit<1||limit>20)return report("rejected","Only the reviewed bounded report schema is supported",{},["Validate before opening a database connection"]);
-const {DatabaseSync}=await import("node:sqlite");const db=new DatabaseSync(":memory:");
-try{db.exec("CREATE TABLE observations(tenant TEXT,habitat TEXT); INSERT INTO observations VALUES ('demo','wetland'),('demo','wetland'),('demo','forest'),('other','wetland'); PRAGMA query_only=ON;");
-const sql="SELECT habitat,COUNT(*) AS count FROM observations WHERE tenant=? AND habitat=? GROUP BY habitat LIMIT ?";
-const rows=db.prepare(sql).all("demo",habitat,limit);
-return report("passed","Executed the fixed parameterized local report",{count:rows.length?Number(rows[0].count):0,rows,sql,parameters:["demo",habitat,limit],tenantFrom:"server-owned demo context",database:"SQLite in-memory fixture"},["Install the local seed data","Enable query-only mode","Bind tenant and habitat as parameters","Return only the fixed report fields"]);
-}finally{db.close();}
-
-  }
-};
+if (
+  reportName !== "survey_counts" ||
+  !["forest", "wetland"].includes(habitat) ||
+  !Number.isInteger(limit) ||
+  limit < 1 ||
+  limit > 20
+)
+  return report(
+    "rejected",
+    "Only the reviewed bounded report schema is supported",
+    {},
+    ["Validate before opening a database connection"],
+  );
 ```
 
-Read the architecture page for the remaining source excerpts and explanations, including input handling and optional provider behavior. The diagram describes this application, rather than implying that an external integration has been implemented.
+### 2. Create the SQLite fixture and run a parameterized report
+
+This is an actual in-memory SQLite query. The fixed SQL binds the server-owned demo tenant, habitat and limit as values, enables query-only mode, and closes the database in finally. The other tenant’s rows remain outside the selected report.
+
+Source: [src/lesson.ts](src/lesson.ts#L15) · selected statements
+
+```typescript
+const { DatabaseSync } = await import("node:sqlite");
+
+const db = new DatabaseSync(":memory:");
+
+try {
+  db.exec(
+    "CREATE TABLE observations(tenant TEXT,habitat TEXT); INSERT INTO observations VALUES ('demo','wetland'),('demo','wetland'),('demo','forest'),('other','wetland'); PRAGMA query_only=ON;",
+  );
+  const sql =
+    "SELECT habitat,COUNT(*) AS count FROM observations WHERE tenant=? AND habitat=? GROUP BY habitat LIMIT ?";
+  const rows = db.prepare(sql).all("demo", habitat, limit);
+  return report(
+    "passed",
+    "Executed the fixed parameterized local report",
+    {
+      count: rows.length ? Number(rows[0].count) : 0,
+      rows,
+      sql,
+      parameters: ["demo", habitat, limit],
+      tenantFrom: "server-owned demo context",
+      database: "SQLite in-memory fixture",
+    },
+    [
+      "Install the local seed data",
+      "Enable query-only mode",
+      "Bind tenant and habitat as parameters",
+      "Return only the fixed report fields",
+    ],
+  );
+} finally {
+  db.close();
+}
+```
+
+### Check your understanding
+
+Run **Read the owned wetland report** in the application. Compare the result with these scenario expectations:
+
+```json
+{
+  "input": {
+    "report": "survey_counts",
+    "habitat": "wetland",
+    "limit": 10
+  },
+  "expectedOutcome": "passed",
+  "checkEvidence": {
+    "count": 2
+  }
+}
+```
+
+Then try **Reject an arbitrary SQL operation**. Its expected outcome is `rejected`; identify the condition or evidence field that explains the difference.
 
 ## Validation
 
