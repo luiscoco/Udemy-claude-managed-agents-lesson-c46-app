@@ -1,0 +1,73 @@
+// PostgreSQL read-only report handler with an injected database adapter.
+// No connection, query or provider request runs at module load.
+import { z } from "zod";
+import type Anthropic from "@anthropic-ai/sdk";
+export const ReportRequest = z.strictObject({
+  report: z.literal("survey_counts"), habitat: z.enum(["wetland", "forest"]),
+  limit: z.number().int().min(1).max(20).default(10)
+});
+const HostContext = z.strictObject({ tenantId: z.string().min(1).max(100),
+  canReadSurveyCounts: z.literal(true),
+  allowedHabitats: z.array(z.enum(["wetland", "forest"])) });
+const ReportRows = z.array(z.strictObject({ habitat: z.enum(["wetland", "forest"]),
+  observation_count: z.string().regex(/^\d{1,20}$/) })).max(20);
+export const REPORT_SQL = `SELECT habitat, observation_count::text AS observation_count
+FROM app_reporting.habitat_counts
+WHERE tenant_id = $1 AND habitat = $2
+ORDER BY habitat
+LIMIT $3`;
+export interface DbConnection {
+  query(text: string, values?: unknown[]): Promise<{ rows: unknown[] }>;
+  release(destroy?: boolean): void;
+}
+export interface DbPool { connect(): Promise<DbConnection> }
+// Caller obtains context from authenticated server records, never the model.
+export function planReport(raw: unknown, trustedContext: unknown) {
+  const input = ReportRequest.parse(raw);
+  const context = HostContext.parse(trustedContext);
+  if (!context.allowedHabitats.includes(input.habitat)) throw new Error("Habitat not authorized");
+  return { text: REPORT_SQL, values: [context.tenantId, input.habitat, input.limit], limit: input.limit };
+}
+export async function readReport(pool: DbPool, raw: unknown, trustedContext: unknown) {
+  const plan = planReport(raw, trustedContext); // Reject before acquiring a connection.
+  const connection = await pool.connect();
+  let reusable = false;
+  try {
+    // All statements use THIS checked-out connection, never separate pool.query calls.
+    await connection.query("BEGIN READ ONLY");
+    await connection.query("SET LOCAL statement_timeout = '2000ms'");
+    await connection.query("SET LOCAL lock_timeout = '500ms'");
+    await connection.query("SET LOCAL search_path = pg_catalog");
+    const result = await connection.query(plan.text, plan.values);
+    const rows = ReportRows.parse(result.rows);
+    if (rows.length > plan.limit || rows.some(row => row.habitat !== plan.values[1]))
+      throw new Error("Unexpected report scope");
+    await connection.query("COMMIT");
+    reusable = true;
+    return { report: "survey_counts" as const, rows };
+  } catch {
+    try { await connection.query("ROLLBACK"); reusable = true; }
+    catch { /* Destroy a connection whose transaction state cannot be established. */ }
+    throw new Error("Database report unavailable"); // Avoid leaking raw SQL errors.
+  } finally { connection.release(!reusable); }
+}
+export async function sendReport(client: Anthropic, authorizedSessionId: string,
+  canonicalCustomToolEventId: string, report: Awaited<ReturnType<typeof readReport>>) {
+  return client.beta.sessions.events.send(authorizedSessionId, { events: [{
+    type: "user.custom_tool_result", custom_tool_use_id: canonicalCustomToolEventId,
+    content: [{ type: "text", text: JSON.stringify(report) }]
+  }] }, { maxRetries: 0, timeout: 10000 });
+}
+// REQUIRED DEPLOYMENT CONTROLS (not created by this file):
+// - Dedicated non-superuser, non-owner login; no BYPASSRLS or elevated role inheritance.
+// - SELECT only on the reviewed reporting view, no broad base-table privileges.
+// - Enforce tenant isolation at the DB boundary with reviewed view/RLS semantics;
+//   owners/superusers and view execution semantics require explicit review.
+// - Review functions/extensions, TEMP/schema privileges and resource limits.
+// - Configure bounded pool checkout/connect, driver cancellation and concurrency;
+//   SQL statement_timeout does not bound connection establishment or every client failure.
+// - Keep credentials in the host secret store; do not expose a raw SQL tool.
+// A read-only transaction is a backstop, not complete confidentiality or zero-write
+// protection. LIMIT bounds returned rows, not total scan work or cumulative extraction.
+// Writes, if required, use a separately authorized capability and reviewed workflow.
+// Adapter mocks below in the companion check file do not verify deployed DB grants/RLS.

@@ -1,0 +1,29 @@
+{
+  "source": "live-provider-commentary",
+  "sessionId": "sesn_01G37je8DcJQYQY5MZZVLPPF",
+  "answer": "This local teaching experiment demonstrates safe database access by using parameterized queries \u2014 binding tenant, habitat, and limit as separate parameters rather than interpolating them into SQL strings. It runs against an in-memory SQLite fixture with query-only mode enabled, ensuring no data can be modified. The fixed report returns only pre-approved fields (habitat and count), scoped to a server-owned tenant context to prevent cross-tenant data leakage.",
+  "stopReason": "end_turn",
+  "eventTypes": [
+    "session.status_running",
+    "session.thread_status_running",
+    "user.message",
+    "span.model_request_start",
+    "agent.thinking",
+    "agent.message",
+    "span.model_request_end",
+    "session.thread_status_idle",
+    "session.usage",
+    "session.status_idle"
+  ],
+  "requestUsage": [
+    {
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0,
+      "input_tokens": 643,
+      "output_tokens": 125,
+      "speed": "standard"
+    }
+  ],
+  "experimentHash": "c8bed4aa026bb2995821ab6d133171c06d006cd0ba741827e8e06692444a9858",
+  "scope": "A real text-only model response about the local experiment. External integrations and the experiment's correctness are not certified by this response."
+}

@@ -1,0 +1,13 @@
+{
+  "lesson": "C46",
+  "title": "Safe Data Access with a Database Agent",
+  "path": "lesson-c46\\lesson-c46-app",
+  "port": 3046,
+  "scenarios": 3,
+  "state": "implemented and verified",
+  "liveScope": "text-only commentary about the local result",
+  "typecheck": true,
+  "localTests": true,
+  "browserSmoke": "passed: desktop, mobile, scenario controls, source view",
+  "liveCommentarySmoke": "passed: real text-only session reached end_turn"
+}
